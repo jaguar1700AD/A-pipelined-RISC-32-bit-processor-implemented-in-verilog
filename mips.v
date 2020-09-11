@@ -2,7 +2,7 @@ module mips(input clk);
 	// Convention: The number ahead of a reg denotes the pipeline stage that that reg belonges to
 	// Pipeline Stages: 0, 1, 2, 3, 4
 
-	reg null1, null2, null3, null4, halt; // null denotes whether an instruction should be treated as null; halt denotes whether the pipeline should be halted
+	reg halt; // halt denotes whether the pipeline should be halted
 
 	reg [31:0] pc0, instr_buff1, npc1, npc2;
 	reg [31:0] a2, b2, b3, imm_data2; 
@@ -28,13 +28,17 @@ module mips(input clk);
 	begin
 		if (!halt)
 		begin
-			if (instr_buff1[31:26] == HLT || opcode2 == HLT || opcode3 == HLT || opcode4 == HLT) 
-				null1 <= 1'b1;
+			if (branch_taken)
+			begin
+				instr_buff1 <= NO_OP;
+				pc0 <= alu_out3;
+			end
+			else if (instr_buff1[31:26] == HLT || opcode2 == HLT || opcode3 == HLT || opcode4 == HLT) 
+				instr_buff1 <= NO_OP;
 			else
 			begin
 				instr_buff1 <= instruction_memory[pc0];
-				if (branch_taken) pc0 <= alu_out3;
-				else pc0 <= pc0 + 1;
+				pc0 <= pc0 + 1;
 				npc1 <= pc0 + 1;
 			end
 		end
@@ -45,19 +49,19 @@ module mips(input clk);
 	begin
 		if (!halt)
 		begin
-			if (null1) 
-				null2 <= null1;
-			else if (branch_taken || instr_buff1[31:26] == NO_OP) 
-				null2 <= 1'b1;
+			if (branch_taken || instr_buff1[31:26] == NO_OP) 
+			begin
+				opcode2 <= NO_OP;
+			end
 			else
 			begin
+				//$display("Inside %b", instr_buff1);
 				opcode2 <= instr_buff1[31:26];
-				if (instr_buff1[31] == 0) rd2 <= instr_buff1[20:16] else rd2 <= instr_buff1[15:11];
-				a2 <= register_bank[instr_buff1[25:21]];
-				b2 <= register_bank[instr_buff1[20:16]];
+				rd2 <= instr_buff1[25:21]; 
+				a2 <= register_bank[instr_buff1[20:16]];
+				b2 <= register_bank[instr_buff1[15:11]];
 				imm_data2 <= {{16 {instr_buff1[15]}}, {instr_buff1[15:0]}};
 				npc2 <= npc1;
-				null2 <= null1;
 			end
 		end
 	end
@@ -67,8 +71,10 @@ module mips(input clk);
 	begin
 		if (!halt)
 		begin
-			if (null2)
-				null3 <= null2;
+			if (branch_taken || opcode2 == NO_OP)
+			begin
+				opcode3 <= NO_OP;
+			end
 			else
 			begin
 				case (opcode2)
@@ -86,7 +92,6 @@ module mips(input clk);
 					BNEQZ: begin alu_out3 <= npc2 + imm_data2; cond3 <= (a2 == 0); end
 					BEQZ: begin alu_out3 <= npc2 + imm_data2; cond3 <= (a2 == 0); end
 				endcase
-				null3 <= null2;
 				opcode3 <= opcode2;
 				b3 <= b2;
 				rd3 <= rd2;
@@ -99,17 +104,19 @@ module mips(input clk);
 	begin
 		if (!halt)
 		begin
-			if (null3)
-				null4 <= null3;
+			if (opcode3 == NO_OP)
+			begin
+				opcode4 <= opcode3;
+			end
 			else
 			begin
 				case (opcode3)
 					LW: lmd4 <= data_memory[alu_out3];
 					SW: data_memory[alu_out3] <= b3;
 				endcase
-				null4 <= null3;
 				alu_out4 <= alu_out3;
 				rd4 <= rd3;
+				opcode4 <= opcode3;
 			end
 		end
 	end
@@ -119,7 +126,7 @@ module mips(input clk);
 	begin
 		if (!halt)
 		begin
-			if (!null4)
+			if (opcode4 != NO_OP)
 			begin
 				case (opcode4)
 					ADD: register_bank[rd4] <= alu_out4;
